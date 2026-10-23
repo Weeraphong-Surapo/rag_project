@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="th" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { sans: ['"Noto Sans Thai"', 'Inter', 'system-ui', 'sans-serif'] } } }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    .scroll-thin::-webkit-scrollbar { width: 6px; }
+    .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    .dot { animation: blink 1.2s infinite both; }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink { 0%, 80%, 100% { opacity: .2 } 40% { opacity: 1 } }
+    .fade-in { animation: fade .25s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+  </style>
+</head>
+<body class="h-full bg-gradient-to-br from-slate-50 via-indigo-50 to-violet-50 font-sans text-slate-800">
+  <div class="flex h-full">
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-30 flex w-80 -translate-x-full flex-col border-r border-slate-200 bg-white/90 backdrop-blur transition-transform md:static md:translate-x-0">
+      <div class="flex items-center gap-3 border-b border-slate-200 p-4">
+        <div class="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.25v13m0-13C10.83 5.48 9.25 5 7.5 5S4.17 5.48 3 6.25v13C4.17 18.48 5.75 18 7.5 18s3.33.48 4.5 1.25m0-13C13.17 5.48 14.75 5 16.5 5c1.75 0 3.33.48 4.5 1.25v13c-1.17-.77-2.75-1.25-4.5-1.25s-3.33.48-4.5 1.25"/></svg>
+        </div>
+        <div>
+          <h1 class="text-base font-semibold leading-tight">RAG Chat</h1>
+          <p id="status" class="flex items-center gap-1.5 text-xs text-slate-500"><span class="h-2 w-2 rounded-full bg-slate-300"></span>กำลังตรวจสอบ...</p>
+        </div>
+      </div>
+
+      <div class="space-y-3 border-b border-slate-200 p-4">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500">เพิ่มเอกสาร</h2>
+        <input id="docTitle" placeholder="ชื่อเอกสาร" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+        <textarea id="docText" rows="4" placeholder="วางข้อความที่ต้องการให้ AI ใช้อ้างอิง..." class="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"></textarea>
+        <div class="flex gap-2">
+          <button id="addBtn" class="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50">บันทึกเอกสาร</button>
+          <label class="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50" title="อัปโหลด PDF / TXT / MD / CSV / JSON">
+            ไฟล์
+            <input id="fileInput" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.json" multiple class="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <div class="flex min-h-0 flex-1 flex-col p-4">
+        <div class="mb-2 flex items-center justify-between">
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500">เอกสารทั้งหมด <span id="docCount" class="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">0</span></h2>
+        </div>
+        <ul id="docList" class="scroll-thin flex-1 space-y-2 overflow-y-auto pr-1"></ul>
+      </div>
+
+      <div class="border-t border-slate-200 p-4">
+        <button id="keyBtn" class="text-xs text-slate-500 hover:text-indigo-600">ตั้งค่า API key</button>
+      </div>
+    </aside>
+    <div id="backdrop" class="fixed inset-0 z-20 hidden bg-slate-900/30 md:hidden"></div>
+
+    <!-- Main -->
+    <main class="flex min-w-0 flex-1 flex-col">
+      <header class="flex items-center justify-between border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <button id="menuBtn" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden" aria-label="เมนู">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <div>
+            <h2 class="text-sm font-semibold">ถามตอบจากเอกสารของคุณ</h2>
+            <p id="scopeLabel" class="text-xs text-slate-500">ค้นหาจากเอกสารทั้งหมด</p>
+          </div>
+        </div>
+        <button id="clearBtn" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50">ล้างแชท</button>
+      </header>
+
+      <div id="chat" class="scroll-thin flex-1 overflow-y-auto px-4 py-6">
+        <div id="messages" class="mx-auto max-w-3xl space-y-6"></div>
+      </div>
+
+      <footer class="px-4 pb-5">
+        <form id="form" class="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg shadow-indigo-100/50 focus-within:border-indigo-300">
+          <textarea id="input" rows="1" placeholder="พิมพ์คำถามของคุณ... (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่)" class="max-h-40 flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none"></textarea>
+          <button id="sendBtn" type="submit" class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow transition hover:opacity-90 disabled:opacity-50" aria-label="ส่ง">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.27 3.13a.75.75 0 0 1 1.05-.9l16.5 8.25a.75.75 0 0 1 0 1.34l-16.5 8.25a.75.75 0 0 1-1.05-.9L6 12Zm0 0h7.5"/></svg>
+          </button>
+        </form>
+      </footer>
+    </main>
+  </div>
+
+  <div id="toast" class="pointer-events-none fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-800 px-4 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  messages: $('messages'), chat: $('chat'), form: $('form'), input: $('input'), send: $('sendBtn'),
+  docList: $('docList'), docCount: $('docCount'), status: $('status'), scope: $('scopeLabel'),
+};
+let selected = new Set();
+let sessionId = localStorage.getItem('rag_session') || newSession();
+let hasChat = false;
+let busy = false;
+function newSession() {
+  const id = crypto.randomUUID();
+  localStorage.setItem('rag_session', id);
+  return id;
+}
+
+// ---------- helpers ----------
+const headers = () => {
+  const h = { 'Content-Type': 'application/json' };
+  const k = localStorage.getItem('rag_api_key');
+  if (k) h['x-api-key'] = k;
+  return h;
+};
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.opacity = 0), 2500);
+}
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+const scrollDown = () => { els.chat.scrollTop = els.chat.scrollHeight; };
+
+// ---------- status ----------
+async function checkHealth() {
+  try {
+    const h = await (await fetch('/health')).json();
+    const ok = h.ollama === 'up' && h.qdrant === 'up';
+    const msg = ok ? 'พร้อมใช้งาน (Ollama + Qdrant)'
+      : h.ollama !== 'up' ? 'เชื่อมต่อ Ollama ไม่ได้' : 'เชื่อมต่อ Qdrant ไม่ได้';
+    els.status.innerHTML = '';
+    els.status.append(el('span', `h-2 w-2 rounded-full ${ok ? 'bg-emerald-500' : 'bg-red-500'}`),
+      document.createTextNode(msg));
+  } catch {
+    els.status.textContent = 'เซิร์ฟเวอร์ไม่ตอบสนอง';
+  }
+}
+
+// ---------- documents ----------
+async function loadDocs() {
+  try {
+    const docs = await api('/documents');
+    els.docCount.textContent = docs.length;
+    els.docList.innerHTML = '';
+    selected = new Set([...selected].filter((id) => docs.some((d) => d.id === id)));
+    if (!docs.length) {
+      els.docList.append(el('li', 'rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400', 'ยังไม่มีเอกสาร เพิ่มเอกสารเพื่อเริ่มต้น'));
+    }
+    for (const d of docs) {
+      const li = el('li', 'group flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-2.5 text-sm transition hover:border-indigo-300');
+      const cb = el('input'); cb.type = 'checkbox'; cb.className = 'mt-1 accent-indigo-600';
+      cb.checked = selected.has(d.id);
+      cb.title = 'เลือกเพื่อจำกัดการค้นหา';
+      cb.onchange = () => { cb.checked ? selected.add(d.id) : selected.delete(d.id); updateScope(); };
+      const info = el('div', 'min-w-0 flex-1');
+      info.append(el('p', 'truncate font-medium', d.title), el('p', 'text-xs text-slate-400', `${d.chunkCount} ชิ้น`));
+      const del = el('button', 'rounded p-1 text-slate-300 transition hover:bg-red-50 hover:text-red-500', '✕');
+      del.title = 'ลบ';
+      del.onclick = async () => {
+        if (!confirm(`ลบเอกสาร "${d.title}" ?`)) return;
+        try { await api(`/documents/${d.id}`, { method: 'DELETE' }); toast('ลบแล้ว'); loadDocs(); }
+        catch (e) { toast(e.message); }
+      };
+      li.append(cb, info, del);
+      els.docList.append(li);
+    }
+    updateScope();
+  } catch (e) { toast(e.message); }
+}
+function updateScope() {
+  els.scope.textContent = selected.size ? `ค้นหาจาก ${selected.size} เอกสารที่เลือก` : 'ค้นหาจากเอกสารทั้งหมด';
+}
+async function addDoc(title, text) {
+  await api('/documents', { method: 'POST', body: JSON.stringify({ title, text }) });
+}
+$('addBtn').onclick = async () => {
+  const text = $('docText').value.trim();
+  if (!text) return toast('กรุณาใส่ข้อความ');
+  const btn = $('addBtn'); btn.disabled = true; btn.textContent = 'กำลังสร้าง embedding...';
+  try {
+    await addDoc($('docTitle').value.trim() || 'ไม่มีชื่อ', text);
+    $('docTitle').value = ''; $('docText').value = '';
+    toast('บันทึกเอกสารแล้ว'); loadDocs();
+  } catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = 'บันทึกเอกสาร';
+};
+$('fileInput').onchange = async (e) => {
+  for (const f of e.target.files) {
+    toast(`กำลังประมวลผล ${f.name}...`);
+    try {
+      await api(`/documents/upload?filename=${encodeURIComponent(f.name)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f,
+      });
+      toast(`เพิ่ม ${f.name} แล้ว`);
+    } catch (err) { toast(`${f.name}: ${err.message}`); }
+  }
+  e.target.value = ''; loadDocs();
+};
+$('keyBtn').onclick = () => {
+  const k = prompt('API key (เว้นว่างเพื่อลบ)', localStorage.getItem('rag_api_key') || '');
+  if (k === null) return;
+  k ? localStorage.setItem('rag_api_key', k) : localStorage.removeItem('rag_api_key');
+  loadDocs();
+};
+
+// ---------- chat ----------
+function welcome() {
+  els.messages.innerHTML = '';
+  const w = el('div', 'fade-in mt-10 text-center');
+  w.append(
+    el('div', 'mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-2xl text-white shadow-lg', '✨'),
+    el('h3', 'text-xl font-semibold', 'ยินดีต้อนรับ'),
+    el('p', 'mt-1 text-sm text-slate-500', 'เพิ่มเอกสารที่แถบด้านซ้าย แล้วถามคำถามได้เลย'),
+  );
+  const row = el('div', 'mt-6 flex flex-wrap justify-center gap-2');
+  for (const s of ['สรุปเอกสารให้หน่อย', 'มีหัวข้อสำคัญอะไรบ้าง', 'อธิบายแบบเข้าใจง่าย']) {
+    const b = el('button', 'rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600', s);
+    b.onclick = () => { els.input.value = s; els.form.requestSubmit(); };
+    row.append(b);
+  }
+  w.append(row);
+  els.messages.append(w);
+}
+function addUser(text) {
+  const wrap = el('div', 'fade-in flex justify-end');
+  wrap.append(el('div', 'max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-500 to-violet-600 px-4 py-2.5 text-sm text-white shadow', text));
+  els.messages.append(wrap); scrollDown();
+}
+function addBot() {
+  const wrap = el('div', 'fade-in flex gap-3');
+  wrap.append(el('div', 'grid h-8 w-8 shrink-0 place-items-center rounded-full bg-indigo-100 text-sm', '🤖'));
+  const col = el('div', 'min-w-0 max-w-[85%] space-y-2');
+  const bubble = el('div', 'whitespace-pre-wrap rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-2.5 text-sm leading-relaxed shadow-sm');
+  const dots = el('span', 'inline-flex gap-1 py-1');
+  for (let i = 0; i < 3; i++) dots.append(el('span', 'dot h-1.5 w-1.5 rounded-full bg-slate-400'));
+  bubble.append(dots);
+  col.append(bubble); wrap.append(col);
+  els.messages.append(wrap); scrollDown();
+  return { bubble, col, dots };
+}
+function renderSources(col, sources) {
+  if (!sources.length) return;
+  const det = el('details', 'rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs');
+  det.append(el('summary', 'cursor-pointer select-none font-medium text-slate-500', `แหล่งอ้างอิง (${sources.length})`));
+  sources.forEach((s, i) => {
+    const item = el('div', 'mt-2 rounded-lg bg-slate-50 p-2');
+    const head = el('div', 'mb-1 flex items-center justify-between gap-2');
+    head.append(el('span', 'truncate font-medium text-slate-700', `[${i + 1}] ${s.title}`),
+      el('span', 'shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-700', `${Math.round(s.score * 100)}%`));
+    item.append(head, el('p', 'line-clamp-3 whitespace-pre-wrap text-slate-500', s.text));
+    det.append(item);
+  });
+  col.append(det);
+}
+
+async function ask(question) {
+  busy = true; els.send.disabled = true;
+  addUser(question);
+  const { bubble, col } = addBot();
+  let answer = '', started = false;
+  try {
+    const res = await fetch('/query', {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ question, stream: true, sessionId, docIds: selected.size ? [...selected] : undefined }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith('data:')) continue;
+        const evt = JSON.parse(line.slice(5));
+        if (evt.type === 'sources') renderSources(col, evt.sources);
+        else if (evt.type === 'token') {
+          if (!started) { bubble.textContent = ''; started = true; }
+          answer += evt.token; bubble.textContent = answer; scrollDown();
+        } else if (evt.type === 'error') throw new Error(evt.error);
+      }
+    }
+    hasChat = true;
+  } catch (e) {
+    bubble.textContent = `เกิดข้อผิดพลาด: ${e.message}`;
+    bubble.classList.add('border-red-200', 'text-red-600');
+  }
+  busy = false; els.send.disabled = false; els.input.focus();
+}
+
+els.form.onsubmit = (e) => {
+  e.preventDefault();
+  const q = els.input.value.trim();
+  if (!q || busy) return;
+  if (els.messages.firstElementChild?.classList.contains('mt-10')) els.messages.innerHTML = '';
+  els.input.value = ''; els.input.style.height = 'auto';
+  ask(q);
+};
+els.input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); els.form.requestSubmit(); }
+});
+els.input.addEventListener('input', () => {
+  els.input.style.height = 'auto';
+  els.input.style.height = Math.min(els.input.scrollHeight, 160) + 'px';
+});
+$('clearBtn').onclick = () => {
+  fetch(`/sessions/${sessionId}`, { method: 'DELETE', headers: headers() }).catch(() => {});
+  sessionId = newSession(); hasChat = false; welcome();
+};
+
+// mobile sidebar
+const toggle = (open) => {
+  $('sidebar').classList.toggle('-translate-x-full', !open);
+  $('backdrop').classList.toggle('hidden', !open);
+};
+$('menuBtn').onclick = () => toggle(true);
+$('backdrop').onclick = () => toggle(false);
+
+welcome(); checkHealth(); loadDocs();
+setInterval(checkHealth, 30000);
+</script>
+</body>
+</html>

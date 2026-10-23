@@ -1,0 +1,83 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    # GPU (NVIDIA)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: rag-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # Dashboard: http://localhost:6333/dashboard
+    # Bound to 127.0.0.1 only: Qdrant has no auth by default, so it is
+    # reachable from this machine but not from the network.
+    ports:
+      - "127.0.0.1:6333:6333"
+
+  # One-shot job: downloads the LLM and embedding models into the ollama volume
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: rag-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama pull "${LLM_MODEL:-scb10x/llama3.1-typhoon2-8b-instruct}" &&
+        ollama pull "${EMBED_MODEL:-bge-m3}"
+    restart: "no"
+
+  api:
+    build: .
+    container_name: rag-api
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      OLLAMA_URL: http://ollama:11434
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_chunks}
+      LLM_MODEL: ${LLM_MODEL:-scb10x/llama3.1-typhoon2-8b-instruct}
+      EMBED_MODEL: ${EMBED_MODEL:-bge-m3}
+      CHUNK_SIZE: ${CHUNK_SIZE:-800}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-100}
+      TOP_K: ${TOP_K:-4}
+      MIN_SCORE: ${MIN_SCORE:-0.45}
+      API_KEY: ${API_KEY:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama_data:
+  qdrant_data:
