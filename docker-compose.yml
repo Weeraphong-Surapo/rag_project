@@ -59,7 +59,7 @@ services:
       qdrant:
         condition: service_started
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-8003}:3000"
     environment:
       PORT: 3000
       OLLAMA_URL: http://ollama:11434
